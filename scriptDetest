@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "entre votre age "
+read age
+
+echo "vous avez $age ans "
