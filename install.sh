@@ -58,27 +58,38 @@ BRAVE=`sudo snap install brave`
 echo $BRAVE
 echo "---------------------------"
 
-# demande update
-updateFt
-
 # CURL
 echo "Installation de CRUL"
 CRUL=`sudo snap install curl`
 echo $CRUL
 echo "---------------------------"
 
-# demande update
-updateFt
+# ifconfig
+echo "Installation de ifconfig"
+ifconfig=`sudo apt install net-tools`
+echo $ifconfig
+echo "---------------------------"
+
+# Open SSH client et serveur 
+echo "Installation du client OpenSSH"
+openClient=`sudo apt-get install openssh-client`
+echo $openClient
+
+echo "Installation du server OpenSSH"
+openServer=`sudo apt-get install openssh-server`
+echo $openServer
+
+echo "Activation du server OpenSSh"
+echo $(sudo systemctl enable ssh)
+echo "---------------------------"
+
 
 # parti necessaire avant l'installation de Jetbrain Toolbox
 echo "Recherche de l'installation libfuse2 utile pour l'installation de Jetbrain toolbox"
 echo "---------------------------"
-RSlib=$(dpkg -s libfuse2 )
+RSlib=$(dpkg -s libfuse2ssh -V )
 echo "Resultat de la recherche : "
 echo $RSlib
-
-# demande update
-updateFt
 
 # -n si il y a quelque chose en retour
 if [ -n "$RSlib" ]; then
