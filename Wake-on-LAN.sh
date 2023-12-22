@@ -3,7 +3,7 @@
 # Fonction pour envoyer le paquet Wake-on-LAN
 envoyer_wol() {
     mac=$1
-    ip="255.255.255.255"
+    ip="192.168.1.11"
     port=9
 
     # Construire le paquet Wake-on-LAN
