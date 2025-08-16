@@ -8,7 +8,8 @@ LOG_FILE="/volume1/development/scripts/logs/plex_series_organizer.log"
 
 # Fonction pour ecrire dans le log
 log_message() {
-    echo "$(date '+%d/%m/%Y %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%d/%m/%Y %H:%M:%S') - $1" >> "$LOG_FILE"
+    echo "$1"
 }
 
 # Fonction d'aide
