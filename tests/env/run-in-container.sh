@@ -29,7 +29,12 @@
 #
 # Aucune confirmation n'est demandée : rien n'est détruit sur l'hôte. Le
 # conteneur est jetable par construction et l'image est reconstruite en place.
-# Si le démon Docker ne répond pas, le script s'arrête avec un code non nul —
+# Si le démon Docker ne répond pas, tests/env/assurer-docker.sh est appelé : il
+# attend le moteur sous plafond de temps, diagnostique, et ne démarre ni n'arrête
+# jamais Docker Desktop — son option de démarrage n'est pas passée, parce qu'elle
+# ne fonctionne pas depuis la session de l'agent (relevé en tête de cet outil).
+# Le contrôle est ensuite refait, et lui seul tranche. S'il échoue encore, le
+# script s'arrête avec un code non nul —
 # jamais un faux succès, et jamais une attente sans fin : en mode systemd, les
 # interrogations du préflight, le lancement du conteneur détaché, l'attente du
 # démarrage, le diagnostic et la destruction sont tous bornés en temps mural.
@@ -187,6 +192,23 @@ n'est pas au même endroit.
 Une destruction qui échoue ne change en revanche aucun code de retour : elle
 nomme le conteneur survivant et la commande qui le retire à la main, en [WARN].
 
+Un démon Docker qui ne répond pas n'arrête plus le lanceur d'emblée :
+tests/env/assurer-docker.sh est appelé, il attend le moteur sous plafond de
+temps — cas d'un Docker Desktop lancé au démarrage du système et pas encore
+prêt — puis diagnostique. Il ne démarre pas l'application : son option
+--demarrer ne lui est pas passée, le démarrage automatique ne fonctionnant pas
+depuis cette session. Le contrôle est refait ensuite, à l'identique, et c'est lui
+qui tranche — un démon toujours muet rend 3, comme avant. Avec --dry-run, l'outil
+constate et annonce sans attendre.
+
+Cette attente se paie, et le prix est mesuré : là où un démon mort faisait
+échouer le lanceur en une seconde, il le fait échouer en 71 secondes — le temps
+laissé au processus de Docker Desktop pour se montrer avant qu'on conclue qu'il
+ne viendra pas. Si ce processus est bien là mais que son moteur reste muet,
+l'attente va jusqu'au plafond de l'outil, soit plusieurs minutes. Rien n'est
+bloqué pendant ce temps : assurer-docker.sh trace son attente en chemin, et
+« tests/env/assurer-docker.sh --help » en donne les délais exacts.
+
 Options :
       --profil <nom>  Profil de conteneur (défaut : debian). Un profil <nom>
                       correspond au fichier tests/env/Dockerfile.<nom>.
@@ -207,10 +229,10 @@ Codes de retour :
   0       la commande exécutée dans le conteneur a réussi
   2       erreur d'usage — option inconnue, profil inexistant ou déclarant un
           mode d'init inconnu, commande absente
-  3       environnement indisponible — docker absent, démon arrêté ou devenu
-          muet au préflight, au lancement du conteneur ou pendant l'attente,
-          timeout absent, ou systemd qui ne démarre pas dans le conteneur ;
-          rien n'a été exécuté
+  3       environnement indisponible — docker absent, démon toujours arrêté
+          après l'appel à assurer-docker.sh, ou devenu muet au lancement du
+          conteneur ou pendant l'attente, timeout absent, ou systemd qui ne
+          démarre pas dans le conteneur ; rien n'a été exécuté
   4       échec de la construction de l'image ; rien n'a été exécuté
   autre   code de retour de la commande, transmis tel quel
 
@@ -410,6 +432,59 @@ if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_PRESENT="true"
 fi
 
+# L'outil qui attend le démon — attente bornée du moteur, détection d'un Docker
+# Desktop arrêté, diagnostic. Il n'est appelé que dans la branche d'échec du
+# contrôle ci-dessous : quand le démon répond dès le premier « docker info », rien
+# de tout cela ne s'exécute et le lanceur se comporte exactement comme avant.
+ASSURER_DOCKER="$REPERTOIRE_ENV/assurer-docker.sh"
+
+# Il est invoqué par « bash », et non exécuté directement : sur un montage
+# Windows, le bit exécutable de la copie de travail n'est pas garanti — le §4 de
+# tests/README.md le documente déjà pour les scripts lancés dans le conteneur.
+#
+# Son absence n'est pas fatale ici, et c'est délibéré : le lanceur retombe alors
+# sur le message d'avant, celui qui demande de démarrer Docker Desktop à la main.
+# Un fichier manquant ne doit pas transformer un diagnostic clair en erreur de
+# chemin.
+#
+# « --dry-run » est transmis tel quel : un lanceur qui promet de n'exécuter aucune
+# commande docker n'a pas à immobiliser l'appelant plusieurs minutes dans son dos.
+#
+# « --demarrer », en revanche, n'est JAMAIS passé, et ce n'est pas un oubli : le
+# démarrage automatique de Docker Desktop depuis la session de l'agent a été
+# mesuré le 2026-09-04, il échoue — l'application se lance puis se quitte
+# d'elle-même. Docker Desktop est lancé au démarrage du système, et le lanceur
+# n'attend de cet outil que l'attente et le diagnostic.
+#
+# Le code de retour de l'outil est tracé mais ne décide de rien : c'est le second
+# « docker info » qui tranche. Une seule source de vérité sur la disponibilité du
+# démon, la même que la première fois.
+#
+# Cette fonction rend donc toujours 0, y compris quand elle n'a rien pu faire.
+# C'est délibéré, et pas seulement esthétique : appelée nue sous « set -e », un
+# retour non nul tuerait le lanceur ici même, en armant au passage le trap ERR du
+# socle — pour une étape dont l'échec a précisément son propre diagnostic deux
+# lignes plus bas.
+assurer_docker_desktop() {
+    local code=0
+    local options=()
+
+    if [ ! -f "$ASSURER_DOCKER" ]; then
+        warn "Outil de mise à disposition introuvable : $ASSURER_DOCKER"
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        options+=(--dry-run)
+    fi
+
+    bash "$ASSURER_DOCKER" "${options[@]}" || code="$?"
+    if [ "$code" -ne 0 ]; then
+        warn "tests/env/assurer-docker.sh a rendu le code $code."
+    fi
+    return 0
+}
+
 if [ "$MODE_INIT" = "systemd" ] && [ "$TIMEOUT_PRESENT" != "true" ]; then
     error "La commande timeout (GNU coreutils) est introuvable sur cette machine."
     error "Le profil $PROFIL interroge le démon, lance un conteneur détaché, attend le"
@@ -430,14 +505,37 @@ fi
 # d'être le seul endroit où l'on attend sans fin. La borne expirée laisse
 # version_serveur vide, ce qui emprunte la branche ci-dessous — celle qui dit
 # précisément qu'il faut vérifier Docker Desktop.
+#
+# Un démon muet n'arrête plus la course pour autant : c'est ici que
+# tests/env/assurer-docker.sh s'insère. Il attend le moteur sous plafond, et ne
+# démarre ni n'arrête l'application. Le contrôle est ensuite refait — le même, à
+# l'identique —, et c'est lui seul qui décide : si le démon reste muet, le lanceur
+# meurt en 3 comme avant.
 version_serveur=""
 if ! version_serveur="$(borner_si_systemd "$DELAI_SONDAGE" \
         docker info --format '{{.ServerVersion}}' 2>/dev/null)" \
    || [ -z "$version_serveur" ]; then
-    error "Le démon Docker ne répond pas."
-    borner_si_systemd "$DELAI_SONDAGE" docker info 2>&1 | head -n 5 >&2 || true
-    error "Démarrer Docker Desktop, attendre qu'il soit prêt, puis relancer."
-    die "Environnement de test indisponible — rien n'a été exécuté." 3
+    warn "Le démon Docker ne répond pas — attente par tests/env/assurer-docker.sh."
+
+    assurer_docker_desktop
+
+    version_serveur=""
+    if ! version_serveur="$(borner_si_systemd "$DELAI_SONDAGE" \
+            docker info --format '{{.ServerVersion}}' 2>/dev/null)" \
+       || [ -z "$version_serveur" ]; then
+        error "Le démon Docker ne répond toujours pas."
+        borner_si_systemd "$DELAI_SONDAGE" docker info 2>&1 | head -n 5 >&2 || true
+        if [ "$DRY_RUN" = "true" ]; then
+            error "--dry-run : l'état a été constaté et annoncé, sans attendre le moteur."
+            error "Lancer Docker Desktop à la main, attendre qu'il soit prêt, puis relancer."
+        else
+            error "Le diagnostic de assurer-docker.sh est au-dessus de cette ligne."
+            error "Lancer Docker Desktop À LA MAIN, attendre qu'il soit prêt, puis relancer."
+            error "Le lanceur ne le démarre pas : mesuré le 2026-09-04, un démarrage automatique"
+            error "depuis cette session échoue là où le lancement manuel réussit."
+        fi
+        die "Environnement de test indisponible — rien n'a été exécuté." 3
+    fi
 fi
 info "Démon Docker : version serveur $version_serveur"
 

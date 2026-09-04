@@ -1,7 +1,7 @@
 ---
 id: TASK-027
 title: "Rendre le démon Docker disponible sans intervention humaine"
-status: ready
+status: completed
 priority: high
 depends_on: []
 environment: host
@@ -25,11 +25,43 @@ out_of_scope:
   - le redémarrage de la machine
   - la gestion d'un démon Docker distant, ou d'un contexte docker autre que celui par défaut
   - les scripts de Linux/System, Docker/, Kubernetes/ — cet outil sert le harnais de test, pas l'administration
+amendement_2026_09_04: |
+  Le démarrage automatique sort du chemin par défaut : il ne fonctionne pas
+  depuis la session de l'agent, et c'est mesuré.
+
+  Deux tentatives ont été faites lors du premier usage réel. Docker Desktop
+  4.51.0 s'est lancé — processus visible après 14 s, puis 13 s — puis a affiché
+  une boîte de dialogue d'erreur et s'est quitté de lui-même, après 46 s la
+  première fois et 253 s la seconde. Trace : « eventErrorDialog », puis
+  « bind: {"action":"Quit"} », puis « com.docker.backend.exe services: exit
+  status 150 ». Le service com.docker.service était arrêté, en démarrage manuel.
+
+  Lancé à la main par Maxime, Docker Desktop démarre sans afficher la moindre
+  erreur. Le défaut ne tient donc pas à Docker mais au contexte de lancement :
+  « Start-Process » depuis la session de l'agent ne fournit pas ce que Docker
+  Desktop attend — élévation, ou session interactive.
+
+  Décision de Maxime, le 2026-09-04 : Docker Desktop sera lancé au démarrage du
+  système. L'agent n'a plus à le démarrer.
+
+  Ce que l'outil garde, et qui reste nécessaire : reconnaître un démon prêt sans
+  rien faire, ATTENDRE un démon qui démarre — Docker Desktop lancé au boot met du
+  temps à être prêt, et une tâche lancée peu après l'ouverture de session tombe
+  exactement sur ce cas —, détecter un plantage survenu en cours de route, et
+  diagnostiquer proprement au lieu de mourir sur un « docker info » muet.
+
+  Le démarrage reste accessible par une option explicite, non employée par
+  défaut, avec sa limite écrite sur place : si le contexte de lancement change un
+  jour, le code est là et sa limite est documentée plutôt que réinventée.
+
+  La limite qui subsiste, et que Maxime a nommée : si Docker Desktop tombe, rien
+  ne peut être fait sans lui. C'est consigné, pas résolu.
 acceptance_criteria:
   - le démon déjà prêt est reconnu sans rien démarrer, et l'outil rend 0 en moins de cinq secondes
-  - Docker Desktop éteint est démarré, et l'outil attend le démarrage à froid sans conclure trop tôt
-  - un plantage survenu en cours d'exécution est détecté, et une relance est tentée
-  - le nombre de relances est plafonné, et l'outil s'arrête en rendant 3 plutôt que de boucler
+  - un démon qui démarre est attendu sans que l'outil conclue trop tôt — cas de Docker Desktop lancé au boot et pas encore prêt
+  - le démarrage n'est tenté que si l'option explicite est donnée, jamais par défaut, et sa limite mesurée est écrite sur place
+  - un plantage survenu en cours d'exécution est détecté et diagnostiqué, avec la durée écoulée
+  - toute attente est plafonnée, et l'outil s'arrête en rendant 3 plutôt que de boucler
   - l'outil n'arrête jamais Docker Desktop, quel que soit le chemin emprunté
   - chaque démarrage, chaque attente et chaque échec est tracé, avec sa durée réelle
   - run-in-container.sh appelle l'outil au lieu de mourir quand le démon ne répond pas

@@ -823,11 +823,13 @@ sort en 1.
 
 ### Ce que fait le script
 
-1. vérifie que `docker` existe **et que le démon répond** — un démon arrêté
-   produit un message explicite et le code 3, jamais un faux succès ; en mode
-   `systemd`, vérifie aussi `timeout`, qui borne les interrogations du préflight,
-   le lancement du conteneur, l'attente du démarrage, le nettoyage et le
-   diagnostic ;
+1. vérifie que `docker` existe **et que le démon répond**. Un démon qui ne
+   répond pas ne fait plus mourir le lanceur d'emblée : `assurer-docker.sh` est
+   appelé — il **attend** le moteur, il ne démarre rien —, puis **le même
+   contrôle est refait** — s'il échoue encore, message
+   explicite et code 3, jamais un faux succès ; en mode `systemd`, vérifie aussi
+   `timeout`, qui borne les interrogations du préflight, le lancement du
+   conteneur, l'attente du démarrage, le nettoyage et le diagnostic ;
 2. construit l'image du profil si elle est absente ;
 3. lance un conteneur neuf, dépôt monté en **lecture-écriture** sur `/depot`,
    répertoire de travail `/depot` ;
@@ -854,13 +856,178 @@ sort en 1.
 |---|---|
 | 0 | la commande exécutée dans le conteneur a réussi |
 | 2 | erreur d'usage — option inconnue, profil inexistant ou déclarant un mode d'init inconnu, commande absente |
-| 3 | environnement indisponible — `docker` absent, démon arrêté ou **devenu muet au préflight, au lancement du conteneur ou pendant l'attente**, `timeout` absent, ou **systemd qui ne démarre pas** dans le conteneur ; **rien n'a été exécuté** |
+| 3 | environnement indisponible — `docker` absent, démon **toujours arrêté après l'appel à `assurer-docker.sh`** ou **devenu muet au lancement du conteneur ou pendant l'attente**, `timeout` absent, ou **systemd qui ne démarre pas** dans le conteneur ; **rien n'a été exécuté** |
 | 4 | échec de la construction de l'image, rien n'a été exécuté |
 | autre | code de retour de la commande, transmis tel quel |
 
 Les codes 2, 3 et 4 peuvent aussi venir de la commande elle-même : la
 transmission fidèle du code de retour l'impose. Les messages `[ERROR]` lèvent
 l'ambiguïté.
+
+### Attendre le démon — `assurer-docker.sh`
+
+Docker Desktop est une **application** Windows, pas un service. Elle est lancée
+au démarrage du système depuis le 2026-09-04, mais **être lancée n'est pas être
+prête** : l'application initialise WSL2, monte ses systèmes de fichiers, puis
+lance son moteur. Une tâche démarrée peu après l'ouverture de session tombe
+exactement sur cet intervalle, et tout ce qui passe par le lanceur s'arrêtait
+alors sur « le démon Docker ne répond pas ».
+
+```bash
+tests/env/assurer-docker.sh             # constate, attend le moteur, diagnostique
+tests/env/assurer-docker.sh --dry-run   # constate et annonce, sans attendre
+```
+
+Il est appelé **automatiquement** par `run-in-container.sh`, et seulement dans la
+branche où le démon ne répond pas. Quand le démon répond dès le premier
+`docker info`, rien de tout cela ne s'exécute.
+
+**Il ne démarre pas Docker Desktop.** Le démarrage existe, derrière `--demarrer`,
+mais il est hors du chemin par défaut — la section suivante dit pourquoi, avec
+les mesures.
+
+#### Ce qu'il traite, un traitement par état
+
+| État constaté | Ce que l'outil fait |
+|---|---|
+| le démon répond | rien — code 0, en un seul sondage |
+| lancé, moteur pas encore prêt | **attend** — c'est le cas courant |
+| le processus n'est pas (encore) là | attend son apparition, au plus `DELAI_APPARITION` ; au-delà, code 3 |
+| le processus disparaît pendant l'attente | plantage : code 3 tout de suite, avec la durée écoulée |
+| plafond ou délai atteint | code 3, avec diagnostic — **jamais de boucle** |
+
+La **présence du processus** est contrôlée à chaque sondage — `Get-Process
+'Docker Desktop'` —, et pas seulement la réponse du démon : c'est elle qui
+distingue « le moteur n'est pas encore prêt » de « l'application est morte en
+route », deux situations que le seul `docker info` confond. Dans le doute —
+contrôle de présence sans réponse — l'outil suppose l'application lancée et
+attend : conclure dans le doute est le seul vrai risque.
+
+Deux absences du processus, qu'il ne faut pas confondre. **Jamais vu** peut être
+une session qui vient de s'ouvrir : Windows n'a pas encore lancé l'application,
+elle apparaîtra — d'où l'attente bornée par `DELAI_APPARITION`. **Vu puis
+disparu** est un plantage constaté : personne ne le relancera, et attendre cinq
+minutes de plus ne ferait que retarder le message.
+
+Le plantage se lit aussi **d'une exécution à l'autre**, par un témoin —
+l'horodatage du dernier sondage réussi, écrit à côté du journal, dans
+`$LOG_DIR/assurer-docker.temoin` (`logs/` sur la machine de développement,
+répertoire ignoré par Git). Ce témoin **ne change aucune décision**, il n'éclaire
+que la trace : le comportement de l'outil ne dépend que de ce qu'il constate
+lui-même.
+
+#### Pourquoi `--demarrer` n'est pas le chemin par défaut
+
+Le démarrage automatique **ne fonctionne pas depuis la session de l'agent**, et
+c'est mesuré. Premier usage réel, le 2026-09-04, Docker Desktop 4.51.0 :
+
+```text
+15:50:32  démarrage de Docker Desktop (tentative 1/2)
+15:50:45  processus présent après 14 s
+15:51:15  le processus a disparu après 46 s — arrêté en cours de démarrage
+15:51:16  démarrage de Docker Desktop (tentative 2/2)
+15:51:28  processus présent après 13 s
+15:54:43  le processus a disparu après 253 s
+          plafond atteint, code 3
+```
+
+Les journaux de Docker Desktop donnent la suite : `eventErrorDialog`, puis
+`bind: {"action":"Quit"}`, puis `com.docker.backend.exe services: exit status
+150`. Le service `com.docker.service` était `Stopped`, en démarrage `Manual`.
+
+**Le fait décisif :** lancé **à la main**, Docker Desktop démarre sans afficher
+la moindre erreur. Le défaut ne tient donc pas à Docker, ni à la machine, ni au
+chemin de l'exécutable — il tient au **contexte de lancement** : `Start-Process`
+depuis la session de l'agent ne fournit pas ce que Docker Desktop attend,
+élévation ou session interactive. Laquelle des deux n'a pas été établie.
+
+D'où la décision de Maxime, le 2026-09-04 : **Docker Desktop est lancé au
+démarrage du système, l'agent n'a plus à le démarrer.** Le code de démarrage
+reste dans le script, avec sa limite écrite sur place — si le contexte de
+lancement change un jour, il est là plutôt qu'à réinventer.
+`run-in-container.sh` **ne passe pas** cette option.
+
+La limite qui subsiste, et qui n'est pas résolue : **si Docker Desktop tombe,
+aucun chemin de ce dépôt ne peut le relever.** Le message d'échec le dit et
+demande un lancement manuel.
+
+#### Les deux gardes
+
+- **jamais l'arrêt.** Aucun `Stop-Process`, aucun `docker … stop` : aucun chemin
+  du code ne peut éteindre Docker Desktop, qui fait peut-être tourner un
+  conteneur ne relevant pas de ce dépôt ;
+- **un plafond de démarrages**, `PLAFOND_DEMARRAGES`, fixé à **2** par exécution,
+  sur le chemin `--demarrer` uniquement. Un plantage au milieu d'une suite doit
+  pouvoir être rattrapé — ce qu'une tentative unique interdirait —, mais deux
+  morts de suite dans la même attente ne sont plus un accident. Au-delà : code 3.
+  Le relevé ci-dessus a exercé ce plafond, et il a tenu.
+
+#### Les délais
+
+Trois valeurs sont adossées à une mesure du 2026-09-04 ; la principale ne l'est
+pas, et le dit. Ce sont des **bornes**, pas des durées attendues.
+
+| Constante | Valeur | Mesure | Ce qu'elle borne |
+|---|---|---|---|
+| `DELAI_SONDAGE` | 5 s | `docker info` sur démon absent : **< 1 s** | un `docker info`, un `Get-Process`, un `Test-Path` |
+| `DELAI_ABATTAGE` | 5 s | posé | le sursis avant le SIGKILL de `timeout -k` |
+| `DELAI_LANCEMENT` | 30 s | `Start-Process` lui-même : **1 à 2 s** | le lancement, sur `--demarrer` |
+| `DELAI_APPARITION` | 60 s | apparition du processus : **13 à 14 s** | l'attente du processus, après un lancement ou au démarrage de session |
+| `INTERVALLE_SONDAGE` | 5 s | posé | la pause entre deux sondages |
+| `INTERVALLE_TRACE` | 30 s | posé | la périodicité des lignes d'attente |
+| `DELAI_DISPONIBILITE` | 300 s | **jamais mesuré** | l'attente entière |
+
+`DELAI_DISPONIBILITE` **reste posé** : il n'a pas pu être mesuré le 2026-09-04,
+le moteur n'ayant jamais été prêt. Cette exécution a seulement établi que le
+plafond est atteint et rend la main — pas qu'il soit à la bonne hauteur. À
+confirmer le jour où un démarrage complet sera observé de bout en bout. Le
+message d'échec le dit lui-même : si le moteur devient disponible peu après,
+c'est la borne qui est en cause, pas Docker.
+
+Aucune attente n'est laissée libre, et c'est l'enseignement de TASK-020 appliqué
+ici : tout appel externe — `docker info`, `Get-Process`, `Test-Path`,
+`Start-Process` — passe par `timeout`. L'absence de `timeout` fait sortir l'outil
+en 3 : un outil d'attente qui ne peut pas borner ses attentes n'a aucune raison
+d'être appelé.
+
+#### La trace
+
+Chaque attente, chaque disparition de processus et chaque échec est écrit **avec
+sa durée réelle**, dans `$LOG_DIR/assurer-docker.log` comme à l'écran : durée du
+constat initial, délai d'apparition du processus, lignes d'attente périodiques,
+et un bilan final donnant la durée totale — plus, sur `--demarrer`, la durée du
+`Start-Process` et le nombre de démarrages. Sans ces durées, un plantage
+récurrent de Docker sur cette machine passerait pour une lenteur de l'agent.
+C'est ce qui a permis d'écrire le relevé ci-dessus.
+
+#### Options
+
+| Option | Effet |
+|---|---|
+| `--demarrer` | autoriser le démarrage de Docker Desktop si son processus est absent — **hors du chemin par défaut**, voir plus haut |
+| `--dry-run` | constater l'état et annoncer ce qui serait fait, sans attendre ni rien lancer |
+| `-h, --help` | aide |
+
+#### Codes de retour
+
+| Code | Sens |
+|---|---|
+| 0 | le démon répond — d'emblée ou après attente ; ou, en `--dry-run`, l'annonce a été faite |
+| 2 | erreur d'usage — option inconnue |
+| 3 | démon indisponible — `docker`, `timeout` ou `powershell` absent, Docker Desktop non lancé ou arrêté en cours d'attente, plafond de démarrages atteint, ou moteur toujours muet au bout de `DELAI_DISPONIBILITE` |
+
+En `--dry-run`, **le code 0 ne signifie pas que le démon est disponible** : il
+signifie que l'état a été constaté et l'action annoncée. `run-in-container.sh`
+ne s'y trompe pas — il transmet son propre `--dry-run` à l'outil, puis refait le
+contrôle du démon, qui reste seul juge.
+
+Le message d'échec donne le conseil qui fait gagner du temps : **lancer Docker
+Desktop à la main**, attendre qu'il soit prêt, relancer — et non pas seulement
+« ouvrir Docker Desktop et lire son état », qui laisserait croire qu'une option
+du script aurait pu l'éviter.
+
+L'installation de Docker, l'arrêt de Docker Desktop, le redémarrage de la
+machine et tout démon distant sont **hors du périmètre** de cet outil.
 
 ### Profils
 

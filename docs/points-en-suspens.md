@@ -559,3 +559,56 @@ Le dépôt s'est donné pour règle qu'une propriété se mesure. La valeur est
 consignée ici comme jugement, pour qu'un faux positif — une exécution légitime
 abandonnée à 30 s sur une machine lente — soit reconnu pour ce qu'il est : la
 borne à réviser, et non une panne du démon.
+
+---
+
+## 11. Docker Desktop tombé bloque tout, et rien ne peut le relever
+
+**Soulevé le** 2026-09-04, pendant TASK-027.
+
+Toute validation comportementale de ce dépôt passe par un conteneur. Si Docker
+Desktop est arrêté ou en panne, **aucun niveau au-dessus de `lint` ne peut
+s'exécuter** — ni `unit`, ni `integration`, ni `environment`, ni la moitié de
+l'`acceptance`. L'agent s'arrête et le signale, conformément à `AGENTS.md` §7.
+
+**Ce qui a été tenté, et mesuré.** TASK-027 devait rendre l'agent capable de
+démarrer Docker Desktop lui-même. Deux tentatives réelles le 2026-09-04 :
+
+```text
+15:50:32  Démarrage (tentative 1/2)
+15:50:45  Processus présent après 14s
+15:51:15  Le processus a disparu après 46s
+15:51:16  Démarrage (tentative 2/2)
+15:51:28  Processus présent après 13s
+15:54:43  Le processus a disparu après 253s        -> plafond, code 3
+```
+
+Journaux de Docker Desktop 4.51.0 : `eventErrorDialog`, puis
+`bind: {"action":"Quit"}`, puis `com.docker.backend.exe services: exit status
+150`. Le service `com.docker.service` était `Stopped`, en démarrage `Manual`.
+
+**Le fait décisif** : lancé à la main, Docker Desktop démarre sans afficher la
+moindre erreur. Le défaut ne tient donc pas à Docker mais au **contexte de
+lancement** — `Start-Process` depuis la session de l'agent ne fournit pas ce que
+Docker Desktop attend, élévation ou session interactive. Laquelle des deux n'a
+pas été établie.
+
+**Décision du 2026-09-04** : Docker Desktop est lancé au démarrage du système.
+L'agent se borne à attendre qu'il soit prêt et à diagnostiquer son absence.
+
+**Ce qui reste ouvert, et que cette décision ne résout pas.** Si Docker Desktop
+tombe **en cours de session**, il faut une intervention humaine. Un chantier qui
+tourne sans surveillance s'arrête alors jusqu'à ce que quelqu'un le voie.
+
+Trois pistes, aucune essayée :
+
+- passer `com.docker.service` en démarrage **automatique**, ce qui pourrait
+  suffire à rendre `Start-Process` viable — c'est l'hypothèse la plus probable et
+  la moins coûteuse à vérifier ;
+- lancer Docker Desktop par une tâche planifiée Windows, qui s'exécute dans un
+  contexte différent de celui de l'agent ;
+- une notification vers Maxime quand le démon manque — mais le point n° 2
+  ci-dessus n'est pas encore traité, et il n'existe donc aucun canal.
+
+**Concerne** `tests/env/assurer-docker.sh`, `tests/env/run-in-container.sh`, et
+toute tâche dont l'`environment` n'est pas `host`.
