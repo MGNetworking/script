@@ -10,7 +10,7 @@ sélectionnables par `/tache`.
 renvoi vers sa section du plan de refactorisation. Jamais sélectionnable. Une
 entrée devient une tâche lorsqu'elle entre dans l'horizon de travail.
 
-Prochain identifiant libre : **TASK-027**.
+Prochain identifiant libre : **TASK-028**.
 
 Depuis le 2026-09-02, le chantier se déroule en autonomie :
 [ADR-0003](../docs/agent/decisions/ADR-0003-cadrage-execution-autonome.md) fixe
@@ -42,6 +42,7 @@ de ce que cet ADR a tranché.
 | [TASK-010](completed/TASK-010.md) | Mettre en place les sous-agents et la commande `/tache` | `completed` | haute | — | hôte | non |
 | [TASK-020](completed/TASK-020.md) | Construire le profil de conteneur `systemd` et ouvrir le niveau `environment` | `completed` | haute | — | hôte | non |
 | [TASK-021](completed/TASK-021.md) | Écrire `Linux/System/check-disk.sh` | `completed` | moyenne | — | conteneur `debian` | non |
+| [TASK-027](pending/TASK-027.md) | Rendre le démon Docker disponible sans intervention humaine | `ready` | haute | — | hôte | **oui** |
 | [TASK-022](pending/TASK-022.md) | Écrire `Linux/System/check-memory.sh` | `ready` | moyenne | — | conteneur `debian` | non |
 | [TASK-023](pending/TASK-023.md) | Écrire `Linux/System/check-services.sh` | `ready` | moyenne | 020 | conteneur `systemd` | non |
 | [TASK-024](pending/TASK-024.md) | Écrire `Linux/System/notify-failure.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
