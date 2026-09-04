@@ -165,7 +165,41 @@ git écriture     git add, git commit, git checkout -b agent/*, git switch,
 conteneur        docker build, docker run --rm, docker exec, docker logs,
                  docker ps, docker rm — sur les conteneurs et images préfixés
                  mgnet-test-
+hôte, lecture    docker info, wsl --status, Get-Process, Get-Service — pour
+                 constater l'état du démon Docker et diagnostiquer son absence
 ```
+
+`.claude/settings.json` ne pré-autorise que `docker info` et `wsl --status` :
+`Get-Process` et `Get-Service` passent par `powershell -NoProfile -Command`, et
+les autoriser par motif reviendrait à ouvrir PowerShell en entier. Ils
+demanderont donc confirmation. C'est voulu — ce sont des commandes de diagnostic
+occasionnel, pas des commandes de routine.
+
+De même, `tests/env/assurer-docker.sh` est pré-autorisé **sans argument et avec
+`--dry-run` seulement** : `--demarrer` demandera confirmation, ce qui est
+cohérent avec la décision de ne jamais démarrer Docker Desktop depuis l'agent.
+
+### Docker Desktop : constater, jamais agir
+
+L'agent **lit** l'état de Docker Desktop et le diagnostique. Il ne le démarre
+pas, et ne l'arrête sous aucun prétexte.
+
+Le démarrage a été autorisé le 2026-09-04, puis retiré du chemin par défaut le
+jour même, sur mesure : lancé par `Start-Process` depuis la session de l'agent,
+Docker Desktop 4.51.0 affiche une boîte de dialogue d'erreur et se quitte —
+`eventErrorDialog`, puis `exit status 150`. Lancé à la main, il démarre sans
+rien dire. Le défaut tient au contexte de lancement, pas à Docker.
+
+**Décision retenue** : Docker Desktop est lancé au démarrage du système. Le rôle
+de l'agent se borne à attendre qu'il soit prêt — `tests/env/assurer-docker.sh` —
+et à dire clairement ce qui manque quand il ne l'est pas.
+
+**L'arrêt reste interdit en toute circonstance** : un conteneur hors dépôt peut
+en dépendre.
+
+**Limite assumée** : si Docker Desktop tombe, aucune validation comportementale
+n'est possible et aucun chemin du dépôt ne peut le relever. L'agent s'arrête et
+le signale — voir `docs/points-en-suspens.md`.
 
 La fusion et le push sont autorisés depuis
 [ADR-0003](docs/agent/decisions/ADR-0003-cadrage-execution-autonome.md),
