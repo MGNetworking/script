@@ -166,6 +166,31 @@ leurs vrais codes de retour, les validations réellement exécutées. Une comman
 non lancée n'y figure pas. Une validation en échec n'y est pas présentée comme
 réussie. Une réserve se dit.
 
+## 8 bis. Verser ce qui survit à la tâche
+
+**Le contexte de la conversation disparaîtra. Ce qui n'est pas écrit est perdu.**
+
+Avant de clore, demande-toi ce que tu as appris qui **n'appartient pas à cette
+tâche** — un comportement système mesuré, un piège d'outillage, une limite
+d'environnement, une affirmation d'un document rendue fausse par ce travail.
+Puis verse-le là où la prochaine session le trouvera :
+
+| Ce que tu as appris | Où l'écrire |
+|---|---|
+| un fait mesuré sur le comportement du dépôt ou du système | le rapport de la tâche, et le document qu'il concerne |
+| un piège qui frappera le prochain script du domaine | le `README.md` du domaine, ou le corps d'une tâche à venir |
+| un sujet réel, hors périmètre, qu'on écarte pour ne pas dévier | `docs/points-en-suspens.md` |
+| un défaut trouvé et non corrigé | une **nouvelle tâche**, écrite maintenant |
+| une décision d'orientation | un ADR — mais seulement si Maxime l'a tranchée |
+
+**Le test à te poser** : une session neuve, qui n'aurait que les fichiers du
+dépôt, referait-elle le même travail sans retomber dans le même piège ? Si non,
+il manque un écrit.
+
+Ce que tu écris ici doit être **autoportant** : la prochaine session ne verra pas
+cette conversation. Nomme les fichiers, cite les mesures avec leurs chiffres,
+n'écris pas « comme vu plus haut ».
+
 ## 9. Clore
 
 - déplace le fichier de tâche vers `tasks/completed/` ou `tasks/blocked/`, et
@@ -191,6 +216,18 @@ suspens, et la prochaine tâche prête.
 
 S'il reste une tâche `ready` **du même domaine**, reprends à l'étape 1 sans
 demander confirmation — ADR-0003, décision 4.
+
+### Le contexte peut être vidé ici
+
+Une tâche close ne laisse rien derrière elle qui ne soit écrit : c'est l'objet de
+l'étape 8 bis. **Après la fusion, la conversation peut donc être vidée sans
+perte** — la tâche suivante démarre de son fichier, d'`AGENTS.md`, de
+`docs/agent/decisions/` et des rapports.
+
+Le dis-le à Maxime au moment de rendre la main, en une ligne : c'est lui qui tape
+`/clear`, pas toi. S'il reste quoi que ce soit dont tu as besoin et qui n'est pas
+dans le dépôt, alors **l'étape 8 bis a été mal faite** — écris-le avant de le
+proposer.
 
 Quand le domaine est achevé :
 
