@@ -10,7 +10,7 @@ sélectionnables par `/tache`.
 renvoi vers sa section du plan de refactorisation. Jamais sélectionnable. Une
 entrée devient une tâche lorsqu'elle entre dans l'horizon de travail.
 
-Prochain identifiant libre : **TASK-028**.
+Prochain identifiant libre : **TASK-029**.
 
 Depuis le 2026-09-02, le chantier se déroule en autonomie :
 [ADR-0003](../docs/agent/decisions/ADR-0003-cadrage-execution-autonome.md) fixe
@@ -48,6 +48,7 @@ de ce que cet ADR a tranché.
 | [TASK-024](pending/TASK-024.md) | Écrire `Linux/System/notify-failure.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
 | [TASK-025](pending/TASK-025.md) | Écrire `Linux/System/manage-users.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
 | [TASK-026](pending/TASK-026.md) | Écrire `Linux/System/reboot-system.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
+| [TASK-028](pending/TASK-028.md) | Justifier la directive shellcheck nue de `linux-system.test.sh` | `ready` | haute | — | conteneur `debian` | non |
 
 TASK-020 à TASK-026 atomisent le domaine `Linux/System` — plan §1 — dans l'ordre
 fixé par [ADR-0003](../docs/agent/decisions/ADR-0003-cadrage-execution-autonome.md)
@@ -65,6 +66,14 @@ Restent **trois tâches** au domaine — TASK-024, TASK-025 et TASK-026 —, tou
 `ready`, indépendantes entre elles, et toutes sur le profil `debian`. Ce sont
 celles qui écrivent sur le système : elles relèvent du **cycle complet**,
 relecteur obligatoire (ADR-0003, décision 5).
+
+**[TASK-028](pending/TASK-028.md) passe devant elles.** Elle n'appartient pas au
+chantier des scripts : c'est une dette d'une ligne, ouverte par TASK-021, qui
+rend **rouge la commande de référence du dépôt** — une directive `shellcheck`
+déposée sans la justification qu'exige le critère d'acceptation de TASK-011. Tant
+qu'elle n'est pas fermée, `tests/run.sh` sans argument sort en 1, et le prochain
+rapport de tâche qui citera cette commande devra répéter que le rouge n'est pas
+le sien.
 
 ### Chemin critique
 
