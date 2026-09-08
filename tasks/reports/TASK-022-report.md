@@ -196,3 +196,12 @@ Aucun. Les sujets écartés par l'énoncé — traces du tueur de mémoire, pres
 PSI, comptabilité par cgroup, notification d'un seuil dépassé — restent où ils
 étaient : les trois premiers hors du domaine, le dernier dans TASK-024 et
 `docs/points-en-suspens.md` § 2.
+
+## Traçabilité
+
+| Élément | Valeur |
+|---|---|
+| branche | `agent/TASK-022`, fusionnée en `--no-ff` puis supprimée |
+| commit | `a1a13fe` — `feat(linux/system): ajouter check-memory.sh` |
+| fusion | `a0af490` — `merge: TASK-022 — diagnostic mémoire` |
+| diff | 8 fichiers, 2 219 insertions, 13 suppressions |
