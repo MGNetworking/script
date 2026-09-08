@@ -153,9 +153,16 @@ l'acceptance — et agrège leurs verdicts.
 ```text
 tests/integration/
 ├── run-integration.sh        le dispatcher
+├── check-memory.test.sh      check-memory.sh
 ├── configure-cron.test.sh    configure-cron.sh
-└── linux-system.test.sh      les six scripts de Linux/System
+└── linux-system.test.sh      les six scripts de Linux/System, et check-disk.sh
 ```
+
+`check-memory.sh` a son propre fichier plutôt qu'un groupe dans
+`linux-system.test.sh` : ce dernier passe les 4 900 lignes, et l'ordre de ses
+groupes est contraint par une garde d'état — l'empreinte relevée au groupe 2 est
+comparée à celle du groupe 4. Un script qui n'écrit rien n'a aucune raison
+d'entrer dans cette contrainte.
 
 **Ce niveau modifie le système sur lequel il tourne** : il réécrit `/etc/hosts`,
 `/etc/localtime` et `/etc/logrotate.d`. Il n'a rien à faire sur une machine de

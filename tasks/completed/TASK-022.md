@@ -1,7 +1,7 @@
 ---
 id: TASK-022
 title: "Écrire Linux/System/check-memory.sh"
-status: ready
+status: completed
 priority: medium
 depends_on: []
 environment: container-debian
