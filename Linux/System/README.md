@@ -24,8 +24,9 @@ prime toujours sur la valeur du fichier.
 | `configure-swap.sh` | affiche le swap, crée ou redimensionne un fichier d'échange | root | oui |
 | `configure-cron.sh` | dépose `/etc/cron.d/mgnetworking` : planification des scripts automatiques | root | oui |
 | `check-disk.sh` | diagnostic de stockage : systèmes de fichiers, inodes, périphériques, répertoires consommateurs | aucun | non |
+| `check-memory.sh` | diagnostic mémoire : mémoire vive, fichier d'échange, processus consommateurs | aucun | non |
 
-Les autres scripts prévus (`manage-users.sh`, `check-memory.sh`, `check-services.sh`,
+Les autres scripts prévus (`manage-users.sh`, `check-services.sh`,
 `reboot-system.sh`) restent à écrire — voir
 [le plan](../../docs/refactorisation-plan.md).
 
@@ -70,6 +71,10 @@ sudo ./Linux/System/configure-cron.sh --horaire "30 5 * * 7"
 ./Linux/System/check-disk.sh --repertoire /var --top 5
 ./Linux/System/check-disk.sh --sans-repertoires       # sauter l'analyse « du »
 ./Linux/System/check-disk.sh --tous                   # sans filtrer les pseudo-FS
+
+./Linux/System/check-memory.sh                        # diagnostic complet
+./Linux/System/check-memory.sh --seuil 80             # alerter à partir de 80 %
+./Linux/System/check-memory.sh --top 3                # trois processus au lieu de dix
 ```
 
 ### Seuils de `check-disk.sh`
@@ -107,6 +112,55 @@ retrouve sans chercher.
 Un `SRV_DISK_SEUIL` mal saisi n'interrompt pas le diagnostic : il vaut un `[WARN]`
 et le repli sur 85 %, la ligne de commande restant seule à pouvoir rendre 2 —
 voir « Codes de retour » plus bas.
+
+### Seuils de `check-memory.sh`
+
+**Le seuil par défaut est 90 %**, et il porte sur la part de mémoire **non
+disponible** — `(totale - disponible) / totale` — jamais sur l'occupation
+apparente. Comme pour `check-disk.sh`, le seuil est **atteint** et non dépassé :
+la comparaison est en « supérieur ou égal ».
+
+**« Libre » n'est pas « disponible », et c'est tout l'enjeu.** Linux emploie
+toute mémoire inemployée en cache et en tampons, qu'il rend dès qu'un programme
+en réclame : une machine parfaitement saine affiche couramment 95 % d'occupation
+apparente et une mémoire libre proche de zéro. Un seuil posé sur `MemFree`
+crierait au loup à chaque exécution. La sortie affiche les deux valeurs et
+explique la différence à chaque passage, précisément pour que personne ne
+conclue d'une mémoire libre nulle que la machine manque de mémoire.
+
+**Pourquoi 90 % ici et 85 % pour le disque** — le seuil ne porte pas sur la même
+grandeur, et la mémoire ne se dégrade pas comme un disque :
+
+- **un disque qui se remplit prévient.** Il ralentit, il laisse le temps de voir
+  venir. Une mémoire qui manque déclenche le tueur de mémoire du noyau, qui abat
+  un processus sans préavis. Ce que mesure ce seuil est donc une **marge** — de
+  quoi absorber le prochain pic —, pas une tendance ;
+- **10 % de marge reste une marge utile** : 6,4 Go sur un hôte de 64 Go, 200 Mo
+  sur une machine de 2 Go. Sur les petites machines cette marge devient mince,
+  et c'est pour cela que le seuil est réglable : 80 % y donne plus de temps de
+  réaction ;
+- **plus bas, le signal devient du bruit**, pour la même raison que sur le
+  disque : un serveur qui travaille garde peu de mémoire disponible.
+
+**Le fichier d'échange n'a pas de seuil propre**, et son absence n'est jamais
+une anomalie — beaucoup de VPS et tous les conteneurs tournent sans. Le même
+seuil s'applique aux deux grandeurs, mais l'avertissement n'est émis qu'à leur
+**conjonction** : un échange occupé au-delà du seuil **alors que** la mémoire
+l'est aussi. Un échange occupé seul ne dit rien de mauvais — le noyau y déplace
+des pages inactives même quand la mémoire est ample, et ne les rapatrie pas tant
+que personne ne les lit. Les deux ensemble, si : il ne reste plus de réserve
+nulle part, et la machine part en pagination continue puis en OOM. Un second
+seuil configurable donnerait un réglage de plus pour une décision qui n'existe
+pas séparément.
+
+Le seuil se surcharge par `SRV_MEM_SEUIL` dans `config/server.env`, puis par
+`--seuil`, qui l'emporte. Le nombre de processus affichés suit la même règle :
+`SRV_MEM_TOP` puis `--top`, défaut 10. L'origine effective de chaque valeur est
+rappelée en tête de la sortie.
+
+Une valeur fautive venue de `config/server.env` n'interrompt pas le diagnostic :
+elle vaut un `[WARN]` nommant la variable et le repli sur la valeur par défaut,
+la ligne de commande restant seule à pouvoir rendre 2.
 
 ### Planification par cron
 
@@ -189,19 +243,21 @@ sortent tous en 2, sans avoir rien tenté.
 Le 1 constate que le travail n'a pas pu être fait alors que la demande était
 recevable. **Un manque de privilège en relève** : lancer sans `sudo` l'un des
 scripts qui modifient le système rend 1, la commande tapée étant juste.
-`system-info.sh` et `check-disk.sh` font exception et rendent 0 — ils ne font
-que lire, ils n'ont jamais eu besoin de privilège.
+`system-info.sh`, `check-disk.sh` et `check-memory.sh` font exception et rendent
+0 — ils ne font que lire, ils n'ont jamais eu besoin de privilège.
 
-Ces deux-là rendent **0 même lorsqu'une information manque**, et `check-disk.sh`
-rend 0 même lorsqu'un seuil est dépassé : un diagnostic est une lecture, pas un
-verdict. Faire rendre 1 à un disque plein transformerait chaque passage en tâche
-planifiée en échec, et la production de statuts `PASS` / `WARNING` / `FAIL` est
-le rôle du futur `security-check.sh`.
+Ces trois-là rendent **0 même lorsqu'une information manque**, et les deux
+`check-*` rendent 0 même lorsqu'un seuil est dépassé : un diagnostic est une
+lecture, pas un verdict. Faire rendre 1 à un disque plein ou à une mémoire
+saturée transformerait chaque passage en tâche planifiée en échec, et la
+production de statuts `PASS` / `WARNING` / `FAIL` est le rôle du futur
+`security-check.sh`.
 
 `check-disk.sh` rend 2 sur une option inconnue et sur une valeur invalide **tapée
 sur la ligne de commande** : `--seuil` ou `--top` qui n'est pas un entier de 1 à
 100, `--repertoire` qui commence par un tiret ou qui ne désigne pas un répertoire
-accessible.
+accessible. `check-memory.sh` suit la même règle, avec ses deux seules valeurs :
+`--seuil` et `--top`, entiers de 1 à 100, sans zéro initial.
 
 **Une valeur fautive venue de `config/server.env` ne rend jamais 2.** La règle ne
 dépend que de l'origine de la valeur, et elle vaut pour toutes : la ligne de
@@ -216,15 +272,21 @@ disproportionné.
 |---|---|
 | `SRV_DISK_SEUIL=abc` | `[WARN]`, repli sur le seuil par défaut de 85 %, code 0 |
 | `SRV_DISK_REPERTOIRE=/pas/la` | `[WARN]`, section des répertoires sautée, code 0 |
+| `SRV_MEM_SEUIL=abc` | `[WARN]`, repli sur le seuil par défaut de 90 %, code 0 |
+| `SRV_MEM_TOP=zero` | `[WARN]`, repli sur les 10 processus par défaut, code 0 |
 
 Le repli diffère parce que la valeur de repli diffère, et c'est le seul écart
-entre les deux lignes : 85 % reste une comparaison utile, tandis que retomber sur
+entre ces lignes : 85 % reste une comparaison utile, tandis que retomber sur
 `/` ferait parcourir pendant des minutes une arborescence que personne n'a
 demandée et afficherait le classement d'un autre répertoire que celui configuré.
 Un `SRV_DISK_REPERTOIRE` pointant sur `/var/lib/docker`, non traversable par un
 compte ordinaire, ne doit pas non plus priver ce compte de tout le reste du
 diagnostic. L'origine rappelée en tête de sortie porte la trace du repli —
 `85 % (valeur par défaut, SRV_DISK_SEUIL refusé)`.
+
+Les deux valeurs de `check-memory.sh` ont, elles, une valeur par défaut
+utilisable : leur repli est donc le même, et le diagnostic est produit en entier
+dans les deux cas.
 
 Les arguments sont vérifiés avant les privilèges, si bien qu'une commande à la
 fois mal formée et sans `sudo` rend 2 — le reproche le plus utile en premier.
@@ -354,7 +416,7 @@ réserves d'usage tout de même :
 |---|---|
 | aucune action corrective : suppression de fichier, purge de journaux, `apt-get clean`, nettoyage Docker | `Docker/Cleanup/`, et à la main |
 | aucun contrôle de santé matérielle : `smartctl`, `badblocks`, températures | hors du domaine |
-| aucun diagnostic mémoire | `check-memory.sh`, à écrire |
+| aucun diagnostic mémoire | `check-memory.sh` |
 | aucune notification d'un seuil dépassé | la remontée des échecs, [points-en-suspens.md](../../docs/points-en-suspens.md) § 2 |
 | aucun seuil distinct par système de fichiers ni par métrique | un seuil global, surchargeable |
 
@@ -372,6 +434,42 @@ partielle est affichée, assortie d'un avertissement qui dit qu'elle l'est. Les
 pseudo-systèmes de fichiers sont écartés du tableau, `overlay` excepté : c'est
 le seul système de fichiers de la racine d'un conteneur, et l'écarter rendrait
 le script muet là où il sert le plus.
+
+`check-memory.sh` est en lecture seule lui aussi : hors du journal ouvert par
+`lib/common.sh`, il ne crée, ne modifie ni ne supprime aucun fichier, et n'exige
+aucun privilège. Il n'appelle que deux commandes externes — `free` et `ps`, du
+paquet `procps` — et se passe des deux : sans `free`, il lit `/proc/meminfo` et
+le dit ; sans `ps`, il abandonne le seul classement des processus. Aucune des
+deux n'est une dépendance exigée, et son analyse ne parcourt aucune
+arborescence : contrairement à `check-disk.sh`, il n'a aucun coût en temps.
+
+**Ce que `check-memory.sh` ne fait pas** — et ce n'est pas un oubli :
+
+| Il ne fait pas | Où cela se traite |
+|---|---|
+| aucune action corrective : libération de cache, `kill` d'un processus, activation d'un swap | à la main, en connaissance de cause |
+| aucune création ni redimensionnement de fichier d'échange | `configure-swap.sh` |
+| aucune lecture des traces du tueur de mémoire dans `dmesg` ou le journal | hors du domaine |
+| aucune pression mémoire PSI, aucune comptabilité par cgroup | hors du domaine — ces grandeurs relèvent du diagnostic d'un conteneur, pas de la machine |
+| aucun diagnostic de stockage | `check-disk.sh` |
+| aucune notification d'un seuil dépassé | la remontée des échecs, [points-en-suspens.md](../../docs/points-en-suspens.md) § 2 |
+
+Comme `check-disk.sh`, il ne masque pas ce qu'il n'a pas pu lire, et **« non
+disponible » y dit une ignorance quand « aucune » dit un constat** : un
+`/proc/swaps` lu et vide donne « aucune zone d'échange active », tandis qu'un
+`/proc/swaps` illisible donne « non disponible ». La colonne de mémoire
+résidente, enfin, compte les pages partagées dans chaque processus qui les
+emploie : la somme de cette colonne dépasse la mémoire réellement occupée, et la
+sortie le dit plutôt que de laisser croire à une addition juste.
+
+Deux réserves de lecture, sans conséquence sur le système :
+
+- **dans un conteneur sans `lxcfs`, `free` et `/proc/meminfo` décrivent la
+  machine hôte** et non le conteneur. Les chiffres restent justes, ils ne
+  portent simplement pas sur ce que l'on croit ;
+- **la colonne `available` de `free` n'existe que depuis procps-ng 3.3.10**, et
+  `MemAvailable` que depuis Linux 3.14. Sur un système antérieur, le seuil n'a
+  rien à comparer : le script l'annonce au lieu d'inventer une valeur.
 
 `update-system.sh` installe des paquets. Il ne redémarre jamais le serveur : un
 redémarrage nécessaire est signalé en fin d'exécution, jamais déclenché.
