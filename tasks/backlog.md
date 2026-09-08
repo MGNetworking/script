@@ -43,8 +43,8 @@ de ce que cet ADR a tranché.
 | [TASK-020](completed/TASK-020.md) | Construire le profil de conteneur `systemd` et ouvrir le niveau `environment` | `completed` | haute | — | hôte | non |
 | [TASK-021](completed/TASK-021.md) | Écrire `Linux/System/check-disk.sh` | `completed` | moyenne | — | conteneur `debian` | non |
 | [TASK-027](completed/TASK-027.md) | Rendre le démon Docker disponible sans intervention humaine | `completed` | haute | — | hôte | **oui** |
-| [TASK-022](pending/TASK-022.md) | Écrire `Linux/System/check-memory.sh` | `ready` | moyenne | — | conteneur `debian` | non |
-| [TASK-023](pending/TASK-023.md) | Écrire `Linux/System/check-services.sh` | `ready` | moyenne | 020 | conteneur `systemd` | non |
+| [TASK-022](completed/TASK-022.md) | Écrire `Linux/System/check-memory.sh` | `completed` | moyenne | — | conteneur `debian` | non |
+| [TASK-023](completed/TASK-023.md) | Écrire `Linux/System/check-services.sh` | `completed` | moyenne | 020 | conteneur `systemd` | non |
 | [TASK-024](pending/TASK-024.md) | Écrire `Linux/System/notify-failure.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
 | [TASK-025](pending/TASK-025.md) | Écrire `Linux/System/manage-users.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
 | [TASK-026](pending/TASK-026.md) | Écrire `Linux/System/reboot-system.sh` | `ready` | moyenne | — | conteneur `debian` | **oui** |
@@ -56,9 +56,15 @@ puis le destructif. `human_approval_required: true` ne suspend plus l'exécution
 (décision 2) : il signale ce qui mérite une lecture attentive.
 
 **TASK-023 attendait le profil `systemd`**, sans lequel aucune de ses preuves
-n'existait. TASK-020 étant `completed` depuis le 2026-09-03, elle est passée
-`ready` : les six tâches restantes du domaine sont désormais sélectionnables et
-indépendantes entre elles.
+n'existait — le profil `debian` n'a pas d'init, et `systemctl` y est absent. Elle
+a été menée le 2026-09-08, et elle est la **première tâche du dépôt dont la
+preuve vit au niveau `environment`** : c'est ce que TASK-020 avait été construite
+pour rendre possible.
+
+Restent **trois tâches** au domaine — TASK-024, TASK-025 et TASK-026 —, toutes
+`ready`, indépendantes entre elles, et toutes sur le profil `debian`. Ce sont
+celles qui écrivent sur le système : elles relèvent du **cycle complet**,
+relecteur obligatoire (ADR-0003, décision 5).
 
 ### Chemin critique
 
@@ -129,8 +135,8 @@ côté ; elles restent non sélectionnables.
 |---|---|
 | `manage-users.sh` | atomisée : [TASK-025](pending/TASK-025.md) — **la suppression d'un utilisateur en est exclue**, `userdel -r` détruit un répertoire personnel : tâche distincte à écrire |
 | `check-disk.sh` | atomisée : [TASK-021](completed/TASK-021.md) |
-| `check-memory.sh` | atomisée : [TASK-022](pending/TASK-022.md) |
-| `check-services.sh` | atomisée : [TASK-023](pending/TASK-023.md) |
+| `check-memory.sh` | atomisée : [TASK-022](completed/TASK-022.md) |
+| `check-services.sh` | atomisée : [TASK-023](completed/TASK-023.md) |
 | `reboot-system.sh` | atomisée : [TASK-026](pending/TASK-026.md) |
 | brancher la notification sur la ligne de cron | laissé de côté par [TASK-024](pending/TASK-024.md) : changer la ligne déposée impose de reprendre `configure-cron.sh`, son fichier de cas et son README |
 | `df` sur un montage réseau injoignable | laissé de côté par [TASK-021](completed/TASK-021.md) : un `df` peut y suspendre l'exécution indéfiniment |
@@ -240,6 +246,8 @@ se limitera au niveau 1 tant qu'un environnement Synology de test n'existe pas.
 | [TASK-021](completed/TASK-021.md) | Écrire `Linux/System/check-disk.sh` | [rapport](reports/TASK-021-report.md) |
 | [TASK-027](completed/TASK-027.md) | Rendre le démon Docker disponible sans intervention humaine | [rapport](reports/TASK-027-report.md) |
 | [TASK-020](completed/TASK-020.md) | Construire le profil de conteneur `systemd` et ouvrir le niveau `environment` | [rapport](reports/TASK-020-report.md) |
+| [TASK-022](completed/TASK-022.md) | Écrire `Linux/System/check-memory.sh` | [rapport](reports/TASK-022-report.md) |
+| [TASK-023](completed/TASK-023.md) | Écrire `Linux/System/check-services.sh` | [rapport](reports/TASK-023-report.md) |
 
 Les travaux antérieurs à la mise en place de ce backlog — socle `lib/common.sh`,
 six scripts `Linux/System`, documentation — sont tracés dans l'historique Git et

@@ -612,3 +612,79 @@ Trois pistes, aucune essayée :
 
 **Concerne** `tests/env/assurer-docker.sh`, `tests/env/run-in-container.sh`, et
 toute tâche dont l'`environment` n'est pas `host`.
+
+---
+
+## 12. La septième issue de `check-services.sh` est documentée mais non éprouvée
+
+**Soulevé le** 2026-09-08, pendant TASK-023, par le relecteur.
+
+`Linux/System/check-services.sh --service <nom>` a sept issues. Six sont prouvées
+par un cas de `tests/environment/check-services.test.sh`. La septième — **« unité
+non chargée »**, celle où `LoadState` ne vaut ni `loaded`, ni `masked`, ni
+`not-found` — ne l'est que **comme ligne d'aide** : le fichier asserte que
+`--help` la documente, jamais qu'elle se comporte comme annoncé.
+
+Elle est pourtant atteignable, et la mesure a été faite :
+
+```bash
+printf '%%%% ceci n est pas une unite\n' > /etc/systemd/system/sonde.service
+systemctl daemon-reload
+systemctl show -p LoadState --value sonde.service     # → bad-setting
+
+bash Linux/System/check-services.sh --service sonde
+  → code 1
+  → [ERROR] Unité non chargée : « sonde.service » — LoadState vaut « bad-setting ».
+```
+
+**Pourquoi elle a été écartée.** L'éprouver demande une **seconde** unité
+fabriquée dans `/etc/systemd/system` — le groupe 7 en pose déjà une, pour le cas
+« service en échec » — donc un second chemin de restitution à vérifier avant que
+`systemd.test.sh` ne tourne derrière. Aucun critère d'acceptation de TASK-023 ne
+l'exigeait, et élargir le périmètre pour l'ajouter aurait contrevenu à
+`AGENTS.md` §12.
+
+**Pourquoi ce n'est pas urgent.** Le comportement est mesuré et juste ; ce qui
+manque est sa non-régression. Le coût d'un retour en arrière silencieux se
+limite à un message de diagnostic devenu faux sur un cas rare — un fichier
+d'unité mal formé.
+
+**Ce qui est déjà en place pour qu'on ne l'oublie pas.** Le cas est **déclaré au
+bilan** du groupe 8 par un `saute` neutre — et non par `saute_par_nature`, qui
+aurait affirmé à tort qu'aucune exécution ne peut l'atteindre. Il pèse donc dans
+le décompte des non-exécutés, au lieu de reposer sur un commentaire.
+
+**Concerne** `tests/environment/check-services.test.sh`, groupes 1.1 et 8.
+
+---
+
+## 13. `recensement-substitutions.md` ignore les trois diagnostics récents
+
+**Soulevé le** 2026-09-08, pendant TASK-023, par le rédacteur puis par le
+relecteur.
+
+`Linux/System/recensement-substitutions.md` recense, une par une, les
+affectations `var="$(…)"` des **sept** scripts qu'il couvrait à sa rédaction. Les
+trois scripts de diagnostic écrits depuis — `check-disk.sh` (TASK-021),
+`check-memory.sh` (TASK-022), `check-services.sh` (TASK-023) — **n'y figurent
+pas**.
+
+Le document reste vrai sur ce qu'il affirme ; il est simplement devenu
+incomplet, et sa phrase d'introduction dans `Linux/System/README.md` a dû être
+reformulée deux fois pour continuer à dire la vérité.
+
+**Pourquoi ce n'est pas grave.** Les trois scripts absents ont, chacun, **toutes
+leurs substitutions en contexte de condition** — vérifié pour `check-services.sh`
+ligne à ligne pendant la relecture de TASK-023 : quatre interrogations de
+`systemctl` produisant une valeur, quatre `if !`. Aucune forme nue, donc aucun
+doublement du `trap ERR` à craindre. C'est un relevé qui manque, pas une dette
+technique.
+
+**Pourquoi ça mérite d'être écrit.** Le relevé sert de **référence à invoquer
+avant toute affirmation** sur le doublement du `trap ERR` dans ce domaine. Un
+document de référence partiel dont l'incomplétude n'est pas déclarée finit par
+être lu comme exhaustif. La reformulation faite en TASK-023 le déclare ; l'écart
+lui-même reste ouvert.
+
+**Concerne** `Linux/System/recensement-substitutions.md` et le paragraphe qui
+l'introduit dans `Linux/System/README.md`.

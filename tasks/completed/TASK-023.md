@@ -1,7 +1,7 @@
 ---
 id: TASK-023
 title: "Écrire Linux/System/check-services.sh"
-status: ready
+status: completed
 priority: medium
 depends_on:
   - TASK-020
