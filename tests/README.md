@@ -523,9 +523,17 @@ niveaux — et agrège leurs verdicts, à l'identique de `run-integration.sh`.
 
 ```text
 tests/environment/
-├── run-environment.sh     le dispatcher
-└── systemd.test.sh        les scripts de Linux/System face à un init réel
+├── run-environment.sh          le dispatcher
+├── check-services.test.sh      check-services.sh
+└── systemd.test.sh             les scripts de Linux/System face à un init réel
 ```
+
+L'ordre de découverte est celui de `find | sort` : **`check-services.test.sh`
+s'exécute avant `systemd.test.sh`**. Ce n'est pas un détail d'affichage — le
+premier arrête et relance un service, et un témoin laissé à terre se verrait
+dans le second, loin de sa cause. Tout fichier de ce niveau qui modifie l'état
+d'un service restitue donc, vérifie sa restitution, et pose son filet avant la
+première modification.
 
 C'est le domicile des preuves qui exigent un **init réel** — `systemctl`,
 `timedatectl`, `hostnamectl`. Sa commande de référence est le profil `systemd`
@@ -572,10 +580,36 @@ lus comme « seul systemd manque ».
 
 Mesuré, les deux profils donnent :
 
-| Profil | Réussites | `NON EXÉCUTÉ` | Fichier | Niveau | `tests/run.sh` |
-|---|---|---|---|---|---|
-| `systemd` | 48 | 2, tous par nature | 4 | 4 | **0** |
-| `debian` | 13 | 13, tous par nature | 4 | 4 | **0** |
+| Fichier | Profil | Réussites | `NON EXÉCUTÉ` | Fichier | Niveau | `tests/run.sh` |
+|---|---|---|---|---|---|---|
+| `systemd.test.sh` | `systemd` | 48 | 2, tous par nature | 4 | 4 | **0** |
+| `systemd.test.sh` | `debian` | 13 | 13, tous par nature | 4 | 4 | **0** |
+| `check-services.test.sh` | `systemd` | 286 | 3 | 4 | 4 | **0** |
+| `check-services.test.sh` | `debian` | 133 | 27, tous par nature | 4 | 4 | **0** |
+
+#### L'état du profil `systemd` n'est pas déterministe
+
+**Relevé par TASK-023, et à ne pas redécouvrir.** `getty@tty1.service` part en
+boucle de redémarrage dans ce conteneur et bascule seul en `failed` au bout de
+deux à trois secondes — **ou pas**. Trois lancements de la même image ont donné
+successivement `running`, `degraded`, puis `running` avec zéro unité en échec.
+
+Conséquence pour tout fichier de cas de ce niveau : **aucune assertion ne peut
+porter sur `systemctl is-system-running`, ni sur le nombre d'unités en échec de
+l'image.** Un cas qui a besoin d'une unité en échec la **fabrique lui-même** —
+un fichier d'unité déposé dans `/etc/systemd/system`, gardé et nettoyé comme
+tout groupe modifiant — plutôt que de compter sur l'état du conteneur.
+
+C'est aussi ce qui disqualifie `getty@tty1.service` comme service témoin.
+`dbus.service` et `systemd-journald.service` le sont pour une autre raison : ils
+sont activés par socket et reviennent seuls, et couper `dbus` casserait
+`systemd.test.sh`, qui atteint `systemd-hostnamed` et `systemd-timedated` par le
+bus. **Le témoin éprouvé est `systemd-logind.service`** : `stop` puis `start`
+rendent 0 et laissent l'unité respectivement `inactive/dead` et `active/running`,
+et rien d'autre dans la suite n'en dépend. Deux témoins **immobiles** complètent
+le tableau, et permettent de prouver deux états sans rien modifier :
+`systemd-timedated.service` (`loaded/inactive/dead`) et `console-getty.service`
+(`masked`).
 
 #### Ce qui reste hors de portée, et pourquoi
 

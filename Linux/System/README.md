@@ -25,18 +25,19 @@ prime toujours sur la valeur du fichier.
 | `configure-cron.sh` | dépose `/etc/cron.d/mgnetworking` : planification des scripts automatiques | root | oui |
 | `check-disk.sh` | diagnostic de stockage : systèmes de fichiers, inodes, périphériques, répertoires consommateurs | aucun | non |
 | `check-memory.sh` | diagnostic mémoire : mémoire vive, fichier d'échange, processus consommateurs | aucun | non |
+| `check-services.sh` | diagnostic des services systemd : inventaire des actifs, services en échec, vérification d'un service nommé | aucun | non |
 
-Les autres scripts prévus (`manage-users.sh`, `check-services.sh`,
-`reboot-system.sh`) restent à écrire — voir
-[le plan](../../docs/refactorisation-plan.md).
+Les autres scripts prévus (`manage-users.sh`, `reboot-system.sh`) restent à
+écrire — voir [le plan](../../docs/refactorisation-plan.md).
 
 Relevé technique du domaine :
 [recensement-substitutions.md](recensement-substitutions.md) — toutes les
 affectations `var="$(…)"` des sept scripts qu'il couvre, une par une, avec leur
 verdict et sa raison. À lire avant toute affirmation sur le doublement du
-`trap ERR`, décrit plus bas sous « Codes de retour ». `check-disk.sh`, écrit
-après ce relevé, n'y figure pas encore : toutes ses affectations sont en
-contexte de condition, aucune n'est en forme nue.
+`trap ERR`, décrit plus bas sous « Codes de retour ». Le relevé s'arrête à ces
+sept scripts : **aucun des trois diagnostics écrits depuis n'y est versé** —
+`check-disk.sh`, `check-memory.sh` et `check-services.sh` —, toutes leurs
+affectations étant en contexte de condition, aucune en forme nue.
 
 ## Utilisation
 
@@ -75,6 +76,25 @@ sudo ./Linux/System/configure-cron.sh --horaire "30 5 * * 7"
 ./Linux/System/check-memory.sh                        # diagnostic complet
 ./Linux/System/check-memory.sh --seuil 80             # alerter à partir de 80 %
 ./Linux/System/check-memory.sh --top 3                # trois processus au lieu de dix
+
+./Linux/System/check-services.sh                      # inventaire, rend toujours 0
+./Linux/System/check-services.sh --service cron       # 0 si actif, 1 sinon
+./Linux/System/check-services.sh --service ssh.service
+./Linux/System/check-services.sh --service getty@tty1 # unité à instance
+./Linux/System/check-services.sh --service dbus.socket # refusé en 2
+```
+
+`check-services.sh --service <nom>` complète le nom d'un suffixe `.service`
+lorsqu'il n'en porte pas : `cron` et `cron.service` désignent la même unité.
+**Seules les unités `.service` sont acceptées** — un timer, un socket, un target
+ou un mount est refusé en 2, avant toute interrogation du système. Le code de
+retour est exploitable dans un script — `0` si le service est actif, `1`
+sinon :
+
+```bash
+if ./Linux/System/check-services.sh --service cron >/dev/null; then
+    echo "cron tourne"
+fi
 ```
 
 ### Seuils de `check-disk.sh`
@@ -224,7 +244,7 @@ dès que son contenu change.
 
 ## Codes de retour
 
-Les huit scripts suivent la même convention, détaillée dans
+Les dix scripts suivent la même convention, détaillée dans
 [docs/architecture-technique.md §6](../../docs/architecture-technique.md) :
 
 ```text
@@ -243,11 +263,12 @@ sortent tous en 2, sans avoir rien tenté.
 Le 1 constate que le travail n'a pas pu être fait alors que la demande était
 recevable. **Un manque de privilège en relève** : lancer sans `sudo` l'un des
 scripts qui modifient le système rend 1, la commande tapée étant juste.
-`system-info.sh`, `check-disk.sh` et `check-memory.sh` font exception et rendent
-0 — ils ne font que lire, ils n'ont jamais eu besoin de privilège.
+`system-info.sh`, `check-disk.sh`, `check-memory.sh` et `check-services.sh` font
+exception — ils ne font que lire, ils n'ont jamais eu besoin de privilège, et
+aucun manque de privilège ne peut donc les faire sortir en 1.
 
-Ces trois-là rendent **0 même lorsqu'une information manque**, et les deux
-`check-*` rendent 0 même lorsqu'un seuil est dépassé : un diagnostic est une
+Les trois premiers rendent **0 même lorsqu'une information manque**, et les deux
+`check-*` à seuil rendent 0 même lorsqu'un seuil est dépassé : un diagnostic est une
 lecture, pas un verdict. Faire rendre 1 à un disque plein ou à une mémoire
 saturée transformerait chaque passage en tâche planifiée en échec, et la
 production de statuts `PASS` / `WARNING` / `FAIL` est le rôle du futur
@@ -287,6 +308,120 @@ diagnostic. L'origine rappelée en tête de sortie porte la trace du repli —
 Les deux valeurs de `check-memory.sh` ont, elles, une valeur par défaut
 utilisable : leur repli est donc le même, et le diagnostic est produit en entier
 dans les deux cas.
+
+### Les deux modes de `check-services.sh`
+
+`check-services.sh` est le seul diagnostic du domaine dont le code de retour
+dépende du mode, et c'est la seule chose surprenante de ce script :
+
+| Mode | Ce qu'il fait | Code |
+|---|---|---|
+| sans option | inventorie les services actifs, met en évidence ceux en échec | **toujours 0** |
+| `--service <nom>` | répond à une question fermée | **0** actif, **1** dans les six autres cas |
+
+**L'inventaire rend compte, il ne juge pas.** Un service en échec ne change pas
+son code de retour, pour la raison qui fait déjà rendre 0 à un seuil dépassé de
+`check-disk.sh` : sortir en 1 transformerait chaque passage en tâche planifiée
+en échec sur un serveur qui porte une unité en échec — état banal — et la
+production de statuts `PASS` / `WARNING` / `FAIL` est le rôle du futur
+`security-check.sh`.
+
+**`--service` pose au contraire une question dont la réponse est utile à un
+appelant** : *ce service tourne-t-il ?* Un non est un échec d'exécution, code 1.
+Les six façons de ne pas être actif se distinguent **par le message, jamais
+par le code** — un appelant qui teste le code veut savoir si le service tourne,
+pas pourquoi il ne tourne pas. Ce tableau et celui de `--help` disent la même
+chose, et doivent continuer de le dire :
+
+| Ce que dit le message | Ce que systemd répond |
+|---|---|
+| service inconnu de systemd | `LoadState=not-found` |
+| service masqué — il ne peut démarrer ni à la main, ni par dépendance | `LoadState=masked` |
+| unité non chargée — systemd n'a pas pu charger son fichier d'unité | `LoadState` autre que `not-found`, `masked` ou `loaded` |
+| service en échec | `LoadState=loaded`, `ActiveState=failed` |
+| service inactif | `LoadState=loaded`, `ActiveState` autre qu'`active` |
+| état impossible à établir | `systemctl show` n'a rien rendu d'exploitable, ou pas même un `LoadState` |
+
+La dernière ligne n'est pas théorique, elle est mesurée : `--service @` rend
+`[ERROR] L'état de « @.service » n'a pas pu être établi : …`. Le nom ne
+contient que des caractères admis, il franchit donc le contrôle de forme ;
+c'est systemd qui n'en dit ensuite rien d'exploitable. Le script l'annonce au
+lieu de conclure, et rend 1 comme pour les cinq autres.
+
+La troisième non plus : un fichier d'unité au contenu invalide déposé dans
+`/etc/systemd/system` donne `LoadState=bad-setting`. L'unité existe, systemd
+refuse de la charger, et ni « inconnu » ni « masqué » ne décriraient
+l'état — d'où un message qui renvoie vers `systemctl status`.
+
+**Une unité inconnue n'a pas d'état d'exécution.** `systemctl show` rapporte
+`inactive (dead)` pour un nom qu'il ne connaît pas ; la ligne « État
+d'exécution » affiche donc `non disponible` lorsque `LoadState=not-found`,
+comme le font déjà « État d'activation » et « Dernier démarrage ». Afficher la
+valeur brute se lisait *le service existe, il est arrêté* — l'inverse du
+`[ERROR]` qui suit. **Une unité masquée n'est pas traitée de même** : systemd y
+rapporte aussi `inactive (dead)`, mais l'unité existe et n'est effectivement pas
+en cours d'exécution — la valeur est vraie, elle est conservée, et « État
+d'activation » affiche `masked`.
+
+L'ordre de lecture n'est pas indifférent : une unité inconnue et une unité
+masquée annoncent toutes deux `ActiveState=inactive`, état qu'elles partagent
+avec un service simplement arrêté. `LoadState` est donc lu en premier — sans
+quoi le script conseillerait `systemctl start` pour une unité qui n'existe pas.
+C'est aussi la raison pour laquelle l'état vient de `systemctl show`, seul appel
+qui distingue les trois cas en une fois : `systemctl is-active` les confond
+toutes en un même code 3.
+
+Le 2 reste réservé à ce qu'on reproche à l'appelant. Quatre cas, tous refusés
+**avant toute interrogation du système** :
+
+| Ce que l'appelant a écrit | Pourquoi c'est un 2 |
+|---|---|
+| une option inconnue | rien à interpréter |
+| `--service` sans valeur | la question n'est pas posée |
+| un nom qui ne peut pas être une unité | un nom d'unité systemd n'admet que lettres, chiffres, `-`, `_`, `.`, `@`, `\` et `:` ; une valeur commençant par un tiret est une option, pas un nom ; et un point qui ne précède aucun type d'unité connu ne compose pas davantage un nom — `..`, `foo.bar` |
+| une unité qui n'est pas un service | `--service dbus.socket`, `--service local-fs.target`, `--service systemd-tmpfiles-clean.timer` |
+
+**Seules les unités `.service` sont acceptées.** Un nom porteur d'un autre
+suffixe est refusé en 2 : ce script diagnostique des services, et répondre
+`Service actif` à propos de `local-fs.target` serait faux — un target n'est pas
+un service. Les autres types d'unités sont hors du périmètre de ce script, et
+leur état se lit avec `systemctl status`. Un nom **sans** point n'est pas
+concerné : il reçoit `.service`. Un service dont le nom contient un point
+s'écrit donc avec son suffixe — `com.exemple.app.service`.
+
+**Deux fautes se cachent sous ce refus, et le message les distingue.**
+`dbus.socket` nomme une unité réelle d'un autre type : le message renvoie vers
+`systemctl status dbus.socket`, qui répondra. `..` n'est une unité d'aucun
+type : le même conseil enverrait l'appelant sur une commande qui ne peut rien
+lui apprendre, et il reçoit à la place `Nom de service invalide`. Le départage
+se fait sur le suffixe, comparé à la liste close des types d'unités de systemd —
+`socket`, `target`, `timer`, `mount`, `automount`, `swap`, `path`, `device`,
+`slice`, `scope` — et sur la présence d'un nom devant lui : `.socket` n'est pas
+plus une unité que `..`. Le refus, lui, ne change pas : **2** dans les deux cas,
+avant toute interrogation du système.
+
+Ces refus portent sur ce qui ne peut pas être un service, jamais sur ce qui
+n'existe pas : l'inexistence est un constat du système, elle vaut 1.
+
+L'absence de `systemctl` rend **1**, avec un message qui nomme la dépendance :
+la ligne de commande était juste, c'est la machine qui n'a pas ce qu'il faut.
+Aucune distribution n'est exigée — ce qui compte est la présence de systemd, que
+[ADR-0003](../../docs/agent/decisions/ADR-0003-cadrage-execution-autonome.md)
+décision 14 pose partout, sans repli sur SysV ni OpenRC.
+
+**La liste des services en échec n'est pas un état de santé complet du serveur.**
+`systemctl list-units --state=failed` ne montre que les unités **chargées** dont
+l'exécution a échoué : une unité masquée, désactivée ou qui n'a jamais démarré
+n'y figure pas. La sortie du script le dit à chaque passage plutôt que de laisser
+croire à un inventaire exhaustif. L'« état global » affiché en tête vient de
+`systemctl is-system-running` : sa valeur `degraded` signifie qu'au moins une
+unité a échoué — c'est banal, en conteneur notamment, et ce n'est pas une panne
+du gestionnaire de services.
+
+Le script n'agit sur aucun service — ni `start`, ni `stop`, ni `restart`, ni
+`enable`, ni `disable` — et n'écrit rien hors du journal ouvert par
+`lib/common.sh`. Il ne lit pas non plus les journaux d'un service : le message
+renvoie vers `systemctl status` et `journalctl -u`, il ne les exécute pas.
 
 Les arguments sont vérifiés avant les privilèges, si bien qu'une commande à la
 fois mal formée et sans `sudo` rend 2 — le reproche le plus utile en premier.
@@ -390,6 +525,46 @@ détail, verdict par verdict, est dans le recensement.
 `DEMON_CRON="$(chemin_demon_cron)"`, dans `configure-cron.sh`, est une
 affectation elle aussi, mais écrite **dans la condition d'un `if`** : elle relève
 déjà de la garde, et son `return 1` est justement le cas que l'appelante traite.
+
+### Interroger une unité systemd : `show`, jamais `is-active`
+
+Relevé par TASK-023, dans le conteneur du profil `systemd` (Debian 12,
+systemd 252). Le prochain script du domaine qui interroge systemd s'y heurtera.
+
+**`systemctl is-active` ne distingue rien.** Il rend le même code **3** pour une
+unité inactive, pour une unité en échec **et** pour une unité qui n'existe pas.
+Un script qui s'appuie dessus ne peut pas dire à son appelant laquelle des trois
+situations il a rencontrée. `systemctl is-enabled` sur une unité inconnue rend 1
+en déversant un message brut sur `stderr`.
+
+**`systemctl show` les distingue toutes, en un seul appel, et rend toujours 0** —
+y compris sur une unité qui n'existe pas. C'est `LoadState` qui porte la
+réponse, et il se lit **avant** `ActiveState` :
+
+| `LoadState` | `ActiveState` | Situation |
+|---|---|---|
+| `not-found` | `inactive` | l'unité n'existe pas — `UnitFileState` est une **ligne vide** |
+| `masked` | `inactive` | l'unité existe, elle est liée à `/dev/null` |
+| `bad-setting`, autre | — | le fichier d'unité existe mais n'a pas pu être chargé |
+| `loaded` | `active` / `failed` / autre | l'unité est chargée : l'état d'exécution est alors lisible |
+
+Deux pièges de lecture qui accompagnent ce choix :
+
+- **`ActiveEnterTimestamp` peut être vide.** Un service jamais démarré depuis
+  l'amorçage n'a pas de date de dernier démarrage. Afficher la ligne telle quelle
+  produirait un blanc ; `check-services.sh` affiche « non disponible » ;
+- **`show` rapporte `inactive (dead)` pour une unité inconnue.** Relayer cette
+  valeur ferait dire au diagnostic « le service existe, il est arrêté ».
+  `check-services.sh` l'efface lorsque `LoadState` vaut `not-found`, et la
+  conserve pour une unité masquée — celle-là existe.
+
+**`systemctl list-units --failed` n'est pas un état de santé complet.** Il ne
+montre que les unités **chargées** dont l'exécution a échoué : une unité masquée,
+désactivée ou qui n'a jamais démarré n'y figure pas.
+
+Enfin, `systemctl is-system-running` rend **`degraded`**, et un code 1, dès
+qu'une seule unité a échoué. C'est banal — en conteneur notamment — et ce n'est
+pas une panne du gestionnaire de services.
 
 ## Risques
 
